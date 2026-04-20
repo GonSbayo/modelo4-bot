@@ -1,0 +1,42 @@
+version: "3.9"
+
+services:
+
+  # ── IBKR Client Portal Gateway ──────────────────────────────
+  # Puente entre la Web API de IBKR y el bot Python
+  # Se autentica con tu cuenta paper de IBKR
+  ibkr-gateway:
+    image: ghcr.io/extrange/ibkr-gateway:latest
+    container_name: ibkr_gateway
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    environment:
+      - IBKR_USERNAME=${IBKR_USERNAME}
+      - IBKR_PASSWORD=${IBKR_PASSWORD}
+      - TRADING_MODE=paper          # IMPORTANTE: paper trading
+    volumes:
+      - ibkr_conf:/conf
+    healthcheck:
+      test: ["CMD", "curl", "-fk", "https://localhost:5000/v1/api/tickle"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+
+  # ── Bot Python ───────────────────────────────────────────────
+  modelo4-bot:
+    build: .
+    container_name: modelo4_bot
+    restart: unless-stopped
+    depends_on:
+      ibkr-gateway:
+        condition: service_healthy
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - IBKR_GATEWAY_URL=https://ibkr-gateway:5000
+      - IBKR_ACCOUNT=${IBKR_ACCOUNT}
+      - TELEGRAM_TOKEN=${TELEGRAM_TOKEN}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
+
+volumes:
+  ibkr_conf:
