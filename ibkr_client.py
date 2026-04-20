@@ -1,22 +1,19 @@
 """
-Data client — usa yfinance para obtener velas de MNQ
-mientras se configura el IBKR gateway.
+Data client — usa yfinance para obtener velas de NQ/MNQ
 """
 import logging
 import os
 import asyncio
 from datetime import datetime
-from zoneinfo import ZoneInfo
 
 log = logging.getLogger(__name__)
-ET = ZoneInfo("America/New_York")
 
 DATA_MODE   = os.environ.get("DATA_MODE", "yfinance")
 GATEWAY_URL = os.environ.get("IBKR_GATEWAY_URL", "https://localhost:5000")
 ACCOUNT     = os.environ.get("IBKR_ACCOUNT", "DUM374430")
 
-CONID_MAP = {"MNQ": 495512552, "NQ": 371717522}
-YF_TICKER = {"MNQ": "MNQ=F", "NQ": "NQ=F"}
+# NQ=F funciona mejor que MNQ=F en yfinance
+YF_TICKER = {"MNQ": "NQ=F", "NQ": "NQ=F"}
 
 
 class IBKRClient:
@@ -27,19 +24,21 @@ class IBKRClient:
     async def _yf(self, symbol, timeframe, count):
         try:
             import yfinance as yf
-            ticker = YF_TICKER.get(symbol, f"{symbol}=F")
+
+            ticker   = YF_TICKER.get(symbol, "NQ=F")
             interval = {"1h": "1h", "4h": "1h", "1d": "1d"}.get(timeframe, "1h")
-            period   = {"1h": "5d", "4h": "20d", "1d": "60d"}.get(timeframe, "5d")
+            period   = "30d"  # periodo amplio para asegurar datos
 
             def fetch():
-                return yf.download(ticker, period=period, interval=interval,
-                                   progress=False, auto_adjust=True)
+                t = yf.Ticker(ticker)
+                df = t.history(period=period, interval=interval, auto_adjust=True)
+                return df
 
             loop = asyncio.get_event_loop()
             data = await loop.run_in_executor(None, fetch)
 
             if data is None or data.empty:
-                log.warning("yfinance sin datos para %s", ticker)
+                log.warning("yfinance sin datos para %s (ticker: %s)", symbol, ticker)
                 return []
 
             candles = []
@@ -59,15 +58,18 @@ class IBKRClient:
             if timeframe == "4h":
                 candles = self._to_4h(candles)
 
-            result = candles[-count:]
-            log.info("yfinance: %d velas %s %s", len(result), symbol, timeframe)
+            result = candles[-count:] if len(candles) >= count else candles
+            log.info("yfinance OK: %d velas %s %s (ultimo: %s close: %.2f)",
+                     len(result), symbol, timeframe,
+                     result[-1]["time"] if result else "N/A",
+                     result[-1]["close"] if result else 0)
             return result
 
         except ImportError:
-            log.error("yfinance no instalado")
+            log.error("yfinance no instalado — añade a requirements.txt")
             return []
         except Exception as e:
-            log.error("Error yfinance: %s", e)
+            log.error("Error yfinance %s: %s", symbol, e, exc_info=True)
             return []
 
     def _to_4h(self, c1h):
@@ -75,18 +77,21 @@ class IBKRClient:
         for c in c1h:
             buf.append(c)
             if len(buf) == 4:
-                out.append({"time": buf[0]["time"], "open": buf[0]["open"],
-                            "high": max(x["high"] for x in buf),
-                            "low":  min(x["low"]  for x in buf),
-                            "close": buf[-1]["close"],
-                            "volume": sum(x["volume"] for x in buf)})
+                out.append({
+                    "time":   buf[0]["time"],
+                    "open":   buf[0]["open"],
+                    "high":   max(x["high"] for x in buf),
+                    "low":    min(x["low"]  for x in buf),
+                    "close":  buf[-1]["close"],
+                    "volume": sum(x["volume"] for x in buf),
+                })
                 buf = []
         return out
 
     async def place_limit_order(self, symbol, exchange, side, qty,
                                 price, sl, tp, account):
         oid = f"SIM-{datetime.now().strftime('%H%M%S')}"
-        log.info("🔵 ORDEN SIMULADA | %s %dx %s @ %.2f SL:%.2f TP:%.2f ID:%s",
+        log.info("🔵 ORDEN SIMULADA | %s %dx %s @ %.2f | SL:%.2f | TP:%.2f | ID:%s",
                  side, qty, symbol, price, sl, tp, oid)
         return oid
 
