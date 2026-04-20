@@ -70,7 +70,7 @@ class IBKRClient:
                     "conid": conid,
                     "bar": bar_size,
                     "period": period,
-                    "outsideRth": False,
+                    "outsideRth": "false",
                 }
             )
             candles = []
